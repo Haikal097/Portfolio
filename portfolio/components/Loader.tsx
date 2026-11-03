@@ -94,16 +94,18 @@ export default function Loader() {
         .to(pos, { x: w + w / 2, duration: 1, delay: 0.2, ease: "power4.in" }) // 4.3 – 5s   shoot off
         .to(line, { opacity: 1, duration: 0.4, ease: "power2.in" }, "<")
         .to(".top", {
-          yPercent: -100,
+          yPercent: -120,
           duration: 1,
           delay: 0.1,
           ease: "power4.inOut",
-        }) // 5.1 – 6.1s split open
+        })
         .to(
           ".bottom",
-          { yPercent: 100, duration: 1, ease: "power4.inOut" },
+          { yPercent: 120, duration: 1, ease: "power4.inOut" },
           "<",
         )
+        .to(".edge-glow", { opacity: 1, duration: 0.3 }, "<")
+        .call(() => window.dispatchEvent(new Event("loader-done")), [], "<") // tell the nav line to draw in
         .to(canvas, { opacity: 0, duration: 0.3 }, "<");
 
       return () => gsap.ticker.remove(draw);
@@ -115,8 +117,12 @@ export default function Loader() {
 
   return (
     <div ref={container} className="fixed inset-0 z-50">
-      <div className="top absolute inset-x-0 top-0 h-1/2 bg-black" />
-      <div className="bottom absolute inset-x-0 bottom-0 h-1/2 bg-black" />
+      <div className="top absolute inset-x-0 top-0 h-1/2 bg-black">
+        <div className="edge-glow absolute inset-x-0 bottom-0 opacity-0" />
+      </div>
+      <div className="bottom absolute inset-x-0 bottom-0 h-1/2 bg-black">
+        <div className="edge-glow absolute inset-x-0 top-0 opacity-0" />
+      </div>
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
     </div>
   );
