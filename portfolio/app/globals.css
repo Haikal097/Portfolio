@@ -33,10 +33,20 @@ body {
   );
 }
 
-.nav-tick.is-active span {
+.nav-tick.is-active > span {
   color: white;
   background-color: white;
 }
-.nav-tick.is-active span:last-child {
+.nav-tick.is-active > span:last-child {
   background-color: transparent;
+}
+
+.hero-caret {
+  display: inline-block;
+  width: 0.06em;
+  height: 0.9em;
+  margin-left: 0.04em;
+  margin-right: -0.1em;
+  vertical-align: -0.08em;
+  background: white;
 }
