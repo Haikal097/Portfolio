@@ -1,5 +1,6 @@
 // The headline and intro text on the left of the hero.
 // Classes starting with "hero-" are animated by Hero.tsx.
+import HeroTerminal from "./HeroTerminal";
 
 const LINE_1 = "Ideas that ";
 const WORD = "flow"; // the special word that flows in
@@ -50,6 +51,7 @@ export default function HeroText() {
           I&apos;m Afiq, a [student / developer] from [your city] who turns
           ideas into websites that feel alive.
         </p>
+        <HeroTerminal />
       </div>
 
       {/* Bottom corners */}

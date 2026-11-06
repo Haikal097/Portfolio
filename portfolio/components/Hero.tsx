@@ -137,6 +137,7 @@ export default function Hero() {
             },
             "<0.4",
           )
+          .call(() => window.dispatchEvent(new Event("terminal-start")))
           // when the intro is done, keep the scene gently moving
           .call(idle);
       });
