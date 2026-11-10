@@ -99,7 +99,20 @@ export default function NavLine() {
 
       // Find the section in the middle of the screen, light up its label,
       // and send the dot gliding to its marker. Above the first section (the hero), the ink goes home into the name.
+      // ScrollSnap tells us which page it's gliding to, so the dot can leave right away.
+      // Until that glide is over, we ignore normal scroll updates (they'd still say "old page").
+      let snapUntil = 0;
+      const onPageChange = (e: Event) => {
+        const { id, duration } = (
+          e as CustomEvent<{ id: string; duration: number }>
+        ).detail;
+        snapUntil = performance.now() + duration * 1000 + 200;
+        setActive(id);
+      };
+      window.addEventListener("page-change", onPageChange);
+
       const update = () => {
+        if (performance.now() < snapUntil) return;
         const middle = window.scrollY + window.innerHeight / 2;
         const active = sections.find(({ id }) => {
           const el = document.getElementById(id);
@@ -109,7 +122,11 @@ export default function NavLine() {
             middle < el.offsetTop + el.offsetHeight
           );
         });
-        const id = active?.id ?? "";
+        setActive(active?.id ?? "");
+      };
+
+      const setActive = (id: string) => {
+        const active = sections.find((s) => s.id === id);
         if (id === current) return;
         current = id;
         sections.forEach((s) =>
@@ -461,6 +478,7 @@ export default function NavLine() {
         gsap.ticker.remove(watchComet);
         window.removeEventListener("resize", resize);
         window.removeEventListener("loader-done", intro);
+        window.removeEventListener("page-change", onPageChange);
       };
     },
     { scope: root },
@@ -469,7 +487,7 @@ export default function NavLine() {
   return (
     <div
       ref={root}
-      className="pointer-events-none fixed inset-x-6 top-6 z-40 md:inset-x-10"
+      className="pointer-events-none fixed inset-x-6 top-6 z-40 mix-blend-difference md:inset-x-10"
     >
       <canvas
         ref={canvasRef}
@@ -556,6 +574,8 @@ export default function NavLine() {
             <circle
               key={i}
               className="sig-drop"
+              cx="0"
+              cy="0"
               r="0"
               fill="white"
               opacity="0"
