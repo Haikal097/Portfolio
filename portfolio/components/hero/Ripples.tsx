@@ -158,15 +158,27 @@ export default function Ripples({
 
     // When the loader opens: rings ripple out from the moon, then the dots appear.
     // After that the rings and dots keep drifting at their own changing speeds.
-    const intro = contextSafe!(() => {
-      gsap.to(state, {
-        alpha: 1,
-        scale: 1,
-        duration: 1.4,
-        ease: "power3.out",
-        stagger: 0.07,
-        delay: 0.5,
-      });
+    const intro = contextSafe!((e?: Event) => {
+      if ((e as CustomEvent | undefined)?.detail?.skip) {
+        // The loader was skipped (Loader.tsx): its rings spread out to exactly where these are,
+        // so these don't ripple out. They just fade in, already in place, as those rings arrive.
+        gsap.set(state, { scale: 1 });
+        gsap.to(state, {
+          alpha: 1,
+          duration: 0.5,
+          ease: "sine.inOut",
+          delay: 1.2,
+        });
+      } else {
+        gsap.to(state, {
+          alpha: 1,
+          scale: 1,
+          duration: 1.4,
+          ease: "power3.out",
+          stagger: 0.07,
+          delay: 0.5,
+        });
+      }
       gsap.to(dotsShown, { alpha: 1, duration: 0.6, delay: 1.3 });
       if (still) return;
       state.forEach((s, i) => {

@@ -32,13 +32,31 @@ export default function Loader() {
       // past heights of each dot (-1 to 1), newest first. The trail is drawn from these.
       const histories: { y: number; dx: number }[][] = [[], []];
       // ink drops flicked off the trails; they drift left with the trail and dry up
-      let drops: { x: number; y: number; r: number; life: number }[] = [];
+      let drops: {
+        x: number;
+        y: number;
+        r: number;
+        life: number;
+        still?: boolean;
+      }[] = [];
       const wave = { amplitude: 60 }; // GSAP shrinks this to 0
       const line = { opacity: 0 }; // solid line left behind when the dot shoots off
       const progress = { value: 0 }; // GSAP counts this from 0 to 100
       const label = { opacity: 1 };
       let phase = 0; // where we are in the sine wave
       let avgDelta = 1000 / 60; // smoothed frame time in ms
+
+      // ---- skip: click anywhere ----
+      // thin rings drawn on the canvas. dash: the dash pattern (none = a solid ring)
+      const ripples: {
+        x: number;
+        y: number;
+        r: number;
+        o: number;
+        dash?: number[];
+      }[] = [];
+      // the hole that opens around the moon: everything inside it is washed away
+      const wipe = { x: 0, y: 0, r: 0 };
 
       const draw = (_time: number, deltaTime: number) => {
         // Smooth out the frame time so one slow frame can't make the wave jump.
@@ -172,17 +190,50 @@ export default function Loader() {
         // Drops drift left with the trail, shrink and fade as they dry.
         drops = drops.filter((p) => (p.life -= 0.012 * frames) > 0);
         drops.forEach((p) => {
-          p.x -= step;
+          if (!p.still) p.x -= step; // (the skip's ink-drop trail stays where it was drawn)
           ctx.fillStyle = `rgba(255,255,255,${p.life})`;
           ctx.beginPath();
           ctx.arc(p.x, p.y, p.r * (0.5 + 0.5 * p.life), 0, Math.PI * 2);
           ctx.fill();
         });
+
+        // Skip: wash away everything inside the hole (destination-out = erase instead of paint).
+        // A soft 6px edge, so the wave ends cleanly at the ring.
+        if (wipe.r > 0) {
+          ctx.globalCompositeOperation = "destination-out";
+          const soft = ctx.createRadialGradient(
+            wipe.x,
+            wipe.y,
+            Math.max(0, wipe.r - 6),
+            wipe.x,
+            wipe.y,
+            wipe.r,
+          );
+          soft.addColorStop(0, "rgba(0,0,0,1)");
+          soft.addColorStop(1, "rgba(0,0,0,0)");
+          ctx.fillStyle = soft;
+          ctx.beginPath();
+          ctx.arc(wipe.x, wipe.y, wipe.r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalCompositeOperation = "source-over";
+        }
+
+        // Skip: the rings
+        ctx.lineWidth = 1;
+        ripples.forEach((rp) => {
+          if (rp.o <= 0 || rp.r <= 0) return;
+          ctx.strokeStyle = `rgba(255,255,255,${rp.o})`;
+          ctx.setLineDash(rp.dash ?? []);
+          ctx.beginPath();
+          ctx.arc(rp.x, rp.y, rp.r, 0, Math.PI * 2);
+          ctx.stroke();
+        });
+        ctx.setLineDash([]);
       };
 
       gsap.ticker.add(draw);
 
-      gsap
+      const tl = gsap
         .timeline({ onComplete: () => setDone(true) })
         .to(pos, { x: w * 0.28, duration: 5, ease: "power2.out" }) // 0 – 5s glide in
         .fromTo(
@@ -196,6 +247,7 @@ export default function Loader() {
         .to(wave, { amplitude: 0, duration: 3, ease: "sine.inOut" }, "-=2") // 3 – 6s smooth close
         .to(pos, { x: w + w / 2, duration: 1, delay: 0.2, ease: "power4.in" }) // 4.3 – 5s   shoot off
         .to(line, { opacity: 1, duration: 0.4, ease: "power2.in" }, "<")
+        .addLabel("split", "+=0.1") // where the loader starts opening (too late to skip after this)
         .to(".top", {
           yPercent: -120,
           duration: 1,
@@ -211,7 +263,144 @@ export default function Loader() {
         .call(() => window.dispatchEvent(new Event("loader-done")), [], "<") // tell the nav line to draw in
         .to(canvas, { opacity: 0, duration: 0.3 }, "<");
 
-      return () => gsap.ticker.remove(draw);
+      // ---- Click anywhere to skip ----
+      // A drop of ink flies from your click to the moon. A hole opens around the moon, the size
+      // of its first ring. Then the moon's 11 rings spread out from it, the hole grows with them
+      // to fill the screen, and they settle exactly where the hero's real rings are.
+      const skip = (e: PointerEvent) => {
+        if (tl.time() >= tl.labels.split) return; // it's already opening
+        container.current!.removeEventListener("pointerdown", skip); // only once
+        tl.kill(); // stop the normal loader
+
+        const x = e.clientX;
+        const y = e.clientY;
+        const halves = gsap.utils.toArray<HTMLElement>(
+          ".top, .bottom",
+          container.current,
+        );
+        // Where the hero's rings are: the same sums as Ripples.tsx (the moon is 490 units wide)
+        const box = document
+          .querySelector<HTMLElement>(".hero-float")!
+          .parentElement!.getBoundingClientRect();
+        const mx = box.left + box.width / 2;
+        const my = box.top + box.height / 2;
+        const unit = box.width / 490;
+        const first = 280 * unit; // the moon's first ring
+        // from the moon to the farthest corner of the screen
+        const far = Math.max(
+          Math.hypot(mx, my),
+          Math.hypot(w - mx, my),
+          Math.hypot(mx, h - my),
+          Math.hypot(w - mx, h - my),
+        );
+
+        wipe.x = mx;
+        wipe.y = my;
+        const hole = { r: 0 }; // how big the hole wants to be (it may be pushed bigger by the rings)
+        const ink = { x, y }; // the drop
+        // The bright edge of the hole. The outer rings settle very faint (like the hero's), so without
+        // this edge you couldn't see where the loader ends and it would seem to vanish too early.
+        const edge = { x: mx, y: my, r: 0, o: 0 };
+        ripples.push(edge);
+        const rings: typeof ripples = []; // the moon's rings, once they spread out
+
+        // Cut the same hole out of the two black halves too, so the page shows through
+        const cut = () => {
+          // the hole is always at least as big as the outermost ring,
+          // so nothing of the loader is ever left inside the rings
+          wipe.r = Math.max(
+            hole.r,
+            ...rings.filter((rp) => rp.o > 0).map((rp) => rp.r),
+          );
+          edge.r = wipe.r; // the bright edge always sits exactly where the loader is being washed away
+          halves.forEach((el) => {
+            const m = `radial-gradient(circle at ${mx}px ${my - el.offsetTop}px, transparent ${Math.max(0, wipe.r - 6)}px, black ${wipe.r}px)`;
+            el.style.maskImage = m;
+            el.style.webkitMaskImage = m;
+          });
+        };
+
+        // 1. a small ripple where you clicked...
+        const tap = { x, y, r: 0, o: 0.7 };
+        ripples.push(tap);
+        gsap.to(tap, { r: 60, o: 0, duration: 0.7, ease: "expo.out" });
+        gsap.to(label, { opacity: 0, duration: 0.3 });
+
+        gsap
+          .timeline({ onComplete: () => setDone(true) })
+          // ...and a drop of ink flies to the moon, leaving a dotted trail
+          .to(ink, {
+            x: mx,
+            y: my,
+            duration: 0.32,
+            ease: "power2.in",
+            onUpdate: () =>
+              drops.push({
+                x: ink.x,
+                y: ink.y,
+                r: 2.4,
+                life: 0.5,
+                still: true,
+              }),
+          })
+          // 2. it lands: the hole opens around the moon
+          .call(() => {
+            // skip: true tells Ripples.tsx to fade its rings in already in place
+            window.dispatchEvent(
+              new CustomEvent("loader-done", { detail: { skip: true } }),
+            );
+            edge.o = 1;
+          })
+          .to(hole, {
+            r: first,
+            duration: 0.45,
+            ease: "power3.out",
+            onUpdate: cut,
+          })
+          // 3. the moon's 11 rings spread out from it, one after another
+          .call(() => {
+            for (let i = 0; i < 11; i++) {
+              const rp = {
+                x: mx,
+                y: my,
+                r: first,
+                o: 0,
+                dash: (i % 2 ? [3, 9] : [16, 12]).map((d) => d * unit),
+              };
+              ripples.push(rp);
+              rings.push(rp);
+              const target = Math.max(0.06, 0.6 - i * 0.055); // that hero ring's own brightness
+              gsap
+                .timeline({ delay: i * 0.04 })
+                .set(rp, { o: 0.9 })
+                .to(
+                  rp,
+                  { r: (280 + i * 70) * unit, duration: 1.1, ease: "expo.out" },
+                  0,
+                ) // to its ring's size
+                .to(rp, { o: target, duration: 0.8, ease: "sine.inOut" }, 0) // and brightness
+                .to(
+                  rp,
+                  { o: 0, duration: 0.5, ease: "sine.inOut" },
+                  0.75 - i * 0.04,
+                ); // hand over to the real rings
+            }
+          })
+          // 4. the hole opens up to the whole screen, its edge sweeping across and fading at the end
+          .to(edge, { o: 0.55, duration: 0.3 }, "<")
+          .to(
+            hole,
+            { r: far + 40, duration: 1.2, ease: "power2.inOut", onUpdate: cut },
+            "<",
+          )
+          .to(edge, { o: 0, duration: 0.4, ease: "sine.in" }, "-=0.4");
+      };
+      container.current!.addEventListener("pointerdown", skip);
+
+      return () => {
+        gsap.ticker.remove(draw);
+        container.current?.removeEventListener("pointerdown", skip);
+      };
     },
     { scope: container },
   );
