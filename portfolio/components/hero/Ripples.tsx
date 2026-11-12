@@ -206,6 +206,11 @@ export default function Ripples({
     <canvas
       ref={canvasRef}
       className="pointer-events-none absolute inset-0 -z-10 h-full w-full"
+      style={{
+        maskImage: "linear-gradient(to bottom, #000 72%, transparent 100%)",
+        WebkitMaskImage:
+          "linear-gradient(to bottom, #000 72%, transparent 100%)",
+      }}
     />
   );
 }

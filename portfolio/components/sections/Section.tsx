@@ -16,7 +16,7 @@ export default function Section({ id, number, title, children }: Props) {
     <section
       id={id}
       // scroll-mt leaves room for the fixed nav when you jump to a section
-      className="relative min-h-screen scroll-mt-24 border-t border-white/10 bg-black px-6 py-28 text-white md:px-16"
+      className="relative min-h-screen scroll-mt-24 bg-black px-6 py-28 text-white md:px-16"
     >
       <p className="text-[11px] tracking-[0.2em] text-white/45 uppercase">
         {number} · {title}

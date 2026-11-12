@@ -2,6 +2,7 @@ import Hero from "@/components/Hero";
 import NavLine from "@/components/NavLine";
 import Section from "@/components/sections/Section";
 import ScrollSnap from "@/components/ScrollSnap";
+import ProjectsBackground from "@/components/sections/ProjectsBackground";
 
 // One entry per nav marker, in the same order as the nav.
 // The ids must match SECTIONS in NavLine.tsx.
@@ -27,7 +28,9 @@ export default function Home() {
           id={s.id}
           title={s.title}
           number={String(i + 1).padStart(2, "0")}
-        />
+        >
+          {s.id === "projects" ? <ProjectsBackground /> : undefined}
+        </Section>
       ))}
 
       {/* Footer */}
