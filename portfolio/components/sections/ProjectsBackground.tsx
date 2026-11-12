@@ -87,13 +87,10 @@ export default function ProjectsBackground() {
       for (let k = 0; k < LINES; k++) {
         const sink = sinkOf(k);
         if (sink >= 1) continue;
-        const y0 = H * 0.42 + k * 13 + sink * H * 0.65; // starts 42% down the page, one line every 13px
-        // leaving: the water swells up for a moment before it sinks
-        const swell =
-          p.outAt > p.inAt
-            ? Math.sin(clamp((t - p.outAt) / 0.7) * Math.PI) * 2.2
-            : 0;
-        const amp = (6 + k * 1.4) * (1 + swell); // lower lines move more
+        // starts 42% down the page, one line every 13px; coming and going it only drifts a little
+        // and fades, so the waves stay calm while the page itself is moving
+        const y0 = H * 0.42 + k * 13 + sink * H * 0.12;
+        const amp = 6 + k * 1.4; // lower lines move more
         g.beginPath();
         for (let x = 0; x <= W; x += 4) {
           // two slow waves rolling at different speeds, so the field never repeats exactly
@@ -104,7 +101,7 @@ export default function ProjectsBackground() {
           if (x === 0) g.moveTo(x, y);
           else g.lineTo(x, y);
         }
-        g.strokeStyle = `rgba(255,255,255,${0.03 + (k / LINES) * 0.12})`; // brighter towards the bottom
+        g.strokeStyle = `rgba(255,255,255,${(0.03 + (k / LINES) * 0.12) * (1 - sink)})`; // brighter towards the bottom
         g.stroke();
       }
     };
