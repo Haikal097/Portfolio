@@ -219,6 +219,9 @@ export default function ProjectsBackground() {
       }
       build(band, width);
       bandWidth = width;
+      // share the lanes, so the project rings (ProjectNodes.tsx) can sit on them
+      (window as unknown as { __lanes: unknown }).__lanes = lanes;
+      window.dispatchEvent(new CustomEvent("lanes-built"));
       readyAt = performance.now() / 1000;
       raf = requestAnimationFrame(draw);
     };
