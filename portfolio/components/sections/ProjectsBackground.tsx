@@ -223,6 +223,9 @@ export default function ProjectsBackground() {
       (window as unknown as { __lanes: unknown }).__lanes = lanes;
       window.dispatchEvent(new CustomEvent("lanes-built"));
       readyAt = performance.now() / 1000;
+      window.dispatchEvent(
+        new CustomEvent("lanes-draw", { detail: { start: readyAt } }),
+      );
       raf = requestAnimationFrame(draw);
     };
 
@@ -284,6 +287,9 @@ export default function ProjectsBackground() {
               : 0;
             if (width < bandWidth - 0.5) return;
             readyAt = t;
+            window.dispatchEvent(
+              new CustomEvent("lanes-draw", { detail: { start: t } }),
+            ); // tell the rings when the draw-in starts
           }
           const start = readyAt;
           const k = clamp((t - start - j * 0.12) / 2.2);

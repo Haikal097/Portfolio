@@ -1,12 +1,14 @@
 "use client";
 
 // Project rings on the Projects page: one small ring per project, sitting on its own lane.
-// - They appear one after another once the lanes have drawn in.
+// - Entrance: as the dot that draws each lane passes a ring's spot, the ring pops out there with a splash,
+//   and its title decodes in (scrambled letters settling into the real ones), like the nav labels.
 // - Idle: each ring drifts slowly along its lane, a faint ripple rolls down the six now and then,
 //   and every dot breathes softly.
 // - Every ring shows its title, dimmed. Hover: the ring grows, the title brightens and an arrow appears.
 // - Selected (the first one on arrival, then whichever you clicked): bigger outer ring, bright dot,
 //   a very soft pulse, and the brightest title.
+// - Leaving the page: each ring quickly shrinks to nothing while its title fades and slides into it.
 // - Click: a ripple spreads out from the ring and opens the project. Click again to go back.
 // - The visible ring is small, but each one has an invisible 44px clickable area.
 
@@ -14,7 +16,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 type Pt = { x: number; y: number; s: number };
-type Lane = { pts: Pt[] };
+type Lane = { pts: Pt[]; len: number };
 
 // placeholder projects: replace with your own
 const PROJECTS = [
@@ -26,14 +28,18 @@ const PROJECTS = [
   { title: "Ink Chat", tag: "Node · Socket.io", year: "2024" },
 ];
 
-// where the rings sit: on a slanted line across the lanes, as fractions of the page
-// (top end close to the band, bottom end a bit further right)
-const A = { x: 0.46, y: 0.15 },
-  B = { x: 0.52, y: 0.5 };
+// where the rings sit: one per lane, in a neat slanted row.
+// Ring 1 sits on lane 1 where it reaches TOP of the page height (never higher than MIN_TOP px,
+// so it stays clear of the nav). Each next ring sits STEP px further along its own lane,
+// so the gaps between rings are always the same, whatever the screen size.
+const TOP = 0.22,
+  MIN_TOP = 170,
+  STEP = 80;
 
 export default function ProjectNodes() {
   const [count, setCount] = useState(0); // how many rings (one per lane)
-  const [show, setShow] = useState(false);
+  const [born, setBorn] = useState<boolean[]>([]); // which rings have made their entrance
+  const [leaving, setLeaving] = useState(false); // the outro is playing
   const [hover, setHover] = useState<number | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [open, setOpen] = useState<{
@@ -77,8 +83,9 @@ export default function ProjectNodes() {
         const target = hoverRef.current === i || reduce.matches ? 0 : calm;
         speed[i] += (target - speed[i]) * Math.min(1, dt * 6);
         phase[i] += dt * speed[i];
-        // 26px each way, about 14s per swing, every ring out of step with the others
-        const s = s0 + Math.sin(phase[i] * 0.45 + i * 1.3) * 26;
+        // they all drift together (14px each way, about 14s per swing), with only a small
+        // offset between them, so the spacing stays even and they never bunch up
+        const s = s0 + Math.sin(phase[i] * 0.45 + i * 0.35) * 14;
         // blend between the two lane points either side of s, so it glides instead of hopping
         let k = 1;
         while (k < pts.length - 1 && pts[k].s < s) k++;
@@ -108,51 +115,84 @@ export default function ProjectNodes() {
     };
   }, []);
 
-  // place the rings once the lanes are built, show them after the lanes draw in,
+  // place the rings once the lanes are built; bring them in as the lanes draw in;
   // hide them when you leave the page
   useEffect(() => {
-    let t = 0;
+    let timers: number[] = [];
+    const clear = () => {
+      timers.forEach(clearTimeout);
+      timers = [];
+    };
+    const later = (sec: number, fn: () => void) =>
+      timers.push(window.setTimeout(fn, Math.max(0, sec * 1000)));
     const place = () => {
       const lanes = (window as unknown as { __lanes?: Lane[] }).__lanes;
       const sec = document.getElementById("projects");
       if (!lanes || !sec) return;
-      const W = sec.offsetWidth,
-        H = sec.offsetHeight;
-      const a = { x: A.x * W, y: A.y * H },
-        b = { x: B.x * W, y: B.y * H };
-      const side = (p: Pt) =>
-        (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
-      // where each lane crosses the slanted line
-      baseS.current = lanes.slice(0, PROJECTS.length).map((l) => {
-        for (let i = 1; i < l.pts.length; i++)
-          if (Math.sign(side(l.pts[i])) !== Math.sign(side(l.pts[i - 1])))
-            return l.pts[i].s;
-        return 0;
-      });
+      const H = sec.offsetHeight;
+      const top = Math.max(MIN_TOP, TOP * H);
+      const first = lanes[0].pts.find((p) => p.y >= top)?.s ?? 0;
+      baseS.current = lanes
+        .slice(0, PROJECTS.length)
+        .map((_, j) => first + j * STEP);
       setCount(baseS.current.length);
-      clearTimeout(t);
-      t = window.setTimeout(() => {
-        setShow(true);
-        // the first project starts selected, so there's always one clearly highlighted
-        t = window.setTimeout(
-          () => setSelected((v) => (v === null ? 0 : v)),
-          900,
-        );
-      }, 2400);
+    };
+    // the lanes start drawing in: work out when each ring should arrive
+    const onDraw = (e: Event) => {
+      place();
+      const lanes = (window as unknown as { __lanes?: Lane[] }).__lanes;
+      if (!lanes) return;
+      clear();
+      setBorn([]);
+      const start = (e as CustomEvent<{ start: number }>).detail.start;
+      const now = performance.now() / 1000;
+      // each ring pops out the moment its lane's drawing dot passes its spot
+      // (lane j starts 0.12s after the one before and draws over 2.2s with power3.out,
+      //  so this undoes that curve to find when the dot reaches distance s0)
+      const at = baseS.current.map((s0, j) => {
+        const f = Math.min(1, s0 / lanes[j].len);
+        return start + j * 0.12 + 2.2 * (1 - Math.cbrt(1 - f));
+      });
+      at.forEach((when, j) =>
+        later(when - now, () =>
+          setBorn((b) => {
+            const n = [...b];
+            n[j] = true;
+            return n;
+          }),
+        ),
+      );
+      // the first project becomes selected once they're all in
+      later(Math.max(...at) - now + 0.6, () =>
+        setSelected((v) => (v === null ? 0 : v)),
+      );
     };
     const onChange = (e: Event) => {
-      if ((e as CustomEvent<{ id: string }>).detail.id === "projects") place();
-      else {
-        clearTimeout(t);
-        setShow(false);
+      if ((e as CustomEvent<{ id: string }>).detail.id !== "projects") {
+        clear();
+        // play the outro (shrink and fade), then hide them for good
+        setLeaving(true);
+        later(0.6, () => {
+          setBorn([]);
+          setLeaving(false);
+        });
       }
     };
     place(); // the lanes may already exist (e.g. after a hot reload)
+    // after a hot reload no draw-in comes, so just show them
+    if (
+      Math.abs(
+        document.getElementById("projects")?.getBoundingClientRect().top ?? 99,
+      ) < 5
+    )
+      later(0.5, () => setBorn(baseS.current.map(() => true)));
     window.addEventListener("lanes-built", place);
+    window.addEventListener("lanes-draw", onDraw);
     window.addEventListener("page-change", onChange);
     return () => {
-      clearTimeout(t);
+      clear();
       window.removeEventListener("lanes-built", place);
+      window.removeEventListener("lanes-draw", onDraw);
       window.removeEventListener("page-change", onChange);
     };
   }, []);
@@ -169,7 +209,9 @@ export default function ProjectNodes() {
 
   return (
     // pointer-events-none: only the rings themselves catch the mouse, not the whole page
-    <div className="pointer-events-none absolute inset-0 z-0">
+    <div
+      className={`pointer-events-none absolute inset-0 z-0 ${leaving ? "pn-leave" : ""}`}
+    >
       <style>{CSS}</style>
       {Array.from({ length: count }, (_, i) => {
         const pr = PROJECTS[i];
@@ -179,12 +221,8 @@ export default function ProjectNodes() {
             ref={(el) => {
               btns.current[i] = el;
             }}
-            className={`pn ${hover === i ? "on" : ""} ${selected === i ? "sel" : ""}`}
-            style={{
-              opacity: show ? 1 : 0,
-              transitionDelay: show ? `${i * 0.09}s` : "0s",
-              ["--i" as string]: i,
-            }}
+            className={`pn ${born[i] ? "born" : ""} ${hover === i ? "on" : ""} ${selected === i ? "sel" : ""}`}
+            style={{ ["--i" as string]: i }}
             onMouseEnter={() => setHover(i)}
             onMouseLeave={() => setHover(null)}
             onFocus={() => setHover(i)}
@@ -192,15 +230,21 @@ export default function ProjectNodes() {
             onClick={() => openProject(i)}
             aria-label={`${pr.title}, ${pr.year}`}
           >
-            <span className="ring">
-              <span className="core" />
-              <span className="idle" />
-              <span className="pulse" />
-            </span>
-            <span className="label">
-              <span className="num">0{i + 1}</span>
-              <span className="title">{pr.title}</span>
-              <span className="arrow">→</span>
+            <span className="body">
+              <span className="splash" />
+              <span className="splash s2" />
+              <span className="ring">
+                <span className="core" />
+                <span className="idle" />
+                <span className="pulse" />
+              </span>
+              <span className="label">
+                <span className="num">0{i + 1}</span>
+                <span className="title">
+                  <Decode text={pr.title} go={!!born[i]} />
+                </span>
+                <span className="arrow">→</span>
+              </span>
             </span>
           </button>
         );
@@ -232,20 +276,63 @@ export default function ProjectNodes() {
   );
 }
 
+// the title "decodes" in, like the nav labels: random letters settle into the real ones, left to right
+function Decode({ text, go }: { text: string; go: boolean }) {
+  const [out, setOut] = useState(text);
+  useEffect(() => {
+    if (!go) return;
+    const CH = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/<>*";
+    let raf = 0;
+    const t0 = performance.now() + 120;
+    const step = (now: number) => {
+      const k = Math.max(0, (now - t0) / 650); // 0.65s to settle
+      setOut(
+        text
+          .split("")
+          .map((c, i) =>
+            c === " " || i < k * text.length
+              ? c
+              : CH[(Math.random() * CH.length) | 0],
+          )
+          .join(""),
+      );
+      if (k < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [go, text]);
+  return <>{out}</>;
+}
+
 const EASE = "cubic-bezier(.2,.8,.2,1)";
 const CSS = `
-.pn{position:absolute;left:0;top:0;width:0;height:0;padding:0;border:0;background:none;cursor:pointer;pointer-events:auto;will-change:transform;transition:opacity .6s ease}
+.pn{position:absolute;left:0;top:0;width:0;height:0;padding:0;border:0;background:none;cursor:pointer;pointer-events:auto;will-change:transform}
+.pn .body{position:absolute;left:0;top:0;width:0;height:0}
+/* before its entrance (and after you leave) a ring is hidden and can't be clicked */
+.pn:not(.born){pointer-events:none}
+.pn .ring,.pn .label{opacity:0}
+.pn.born .ring,.pn.born .label{opacity:1}
+div .pn .label{transition:opacity .4s ease .1s,transform .4s ${EASE}}
+.pn .splash{position:absolute;left:0;top:0;width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;border:1px solid #fff;opacity:0}
+.pn.born .splash{animation:pnsplash 1s ease-out .05s 1}
+.pn.born .s2{animation-delay:.22s}
+@keyframes pnsplash{from{transform:scale(.6);opacity:.8}to{transform:scale(4.2);opacity:0}}
+
+
+
 /* the invisible clickable area: 44px, much bigger than the ring you see */
 .pn::before{content:"";position:absolute;left:-22px;top:-22px;width:44px;height:44px;border-radius:50%}
 .pn:focus-visible{outline:none}
 
-.pn .ring{position:absolute;left:0;top:0;width:12px;height:12px;transform:translate(-50%,-50%);border-radius:50%;border:1px solid rgba(255,255,255,.6);transition:all .45s ${EASE}}
+.pn .ring{position:absolute;left:0;top:0;width:12px;height:12px;transform:translate(-50%,-50%) scale(0);border-radius:50%;border:1px solid rgba(255,255,255,.6);transition:opacity .1s ease, transform .6s cubic-bezier(.3,1.6,.5,1), width .45s ${EASE}, height .45s ${EASE}, border-color .45s}
+/* it pops out (with a little overshoot) when it's born */
+.pn.born .ring{transform:translate(-50%,-50%) scale(1)}
 .pn .core{position:absolute;left:50%;top:50%;width:4px;height:4px;margin:-2px 0 0 -2px;border-radius:50%;background:rgba(255,255,255,.75);animation:pnbreath 3.2s ease-in-out infinite;animation-delay:calc(var(--i) * -.5s);transition:all .45s ${EASE}}
 .pn .idle,.pn .pulse{position:absolute;inset:-1px;border-radius:50%;border:1px solid #fff;opacity:0}
 /* idle: a faint ripple rolls down the six rings one after another, every 4.8s */
 .pn .idle{animation:pnidle 4.8s ease-out infinite;animation-delay:calc(var(--i) * .35s + 2.6s)}
 
-.pn .label{position:absolute;right:24px;top:0;transform:translateY(-50%);display:flex;align-items:baseline;gap:8px;white-space:nowrap;pointer-events:none;font-family:var(--font-geist-sans),Manrope,system-ui,sans-serif;transition:transform .4s ${EASE}}
+.pn .label{position:absolute;right:24px;top:0;transform:translateY(-50%);display:flex;align-items:baseline;gap:8px;white-space:nowrap;pointer-events:none;text-shadow:0 0 4px #000,0 0 8px #000,0 0 14px #000;font-family:var(--font-geist-sans),Manrope,system-ui,sans-serif;transition:transform .4s ${EASE}}
 .pn .num{font-size:9px;letter-spacing:.22em;color:rgba(255,255,255,.28);transition:color .3s ease}
 .pn .title{font-size:12px;letter-spacing:.04em;color:rgba(255,255,255,.4);transition:color .3s ease,font-size .3s ease}
 .pn .arrow{position:absolute;left:100%;margin-left:6px;font-size:12px;color:#fff;opacity:0;transform:translateX(-6px);transition:all .35s ${EASE}}
@@ -267,6 +354,14 @@ const CSS = `
 .pn.sel .title{color:#fff;font-size:14px}
 .pn.sel .num{color:rgba(255,255,255,.7)}
 .pn.sel.on .ring{width:26px;height:26px}
+
+/* ---- outro: when you leave, each ring shrinks to nothing while its title fades and slides into it,
+   all within about 0.4s (.03s between rings), so they're gone before the hero shows ---- */
+.pn-leave .pn{pointer-events:none}
+.pn-leave .ring{animation:pnoutr .35s cubic-bezier(.4,0,.2,1) forwards;animation-delay:calc(var(--i) * .03s)}
+@keyframes pnoutr{to{transform:translate(-50%,-50%) scale(0);opacity:0}}
+.pn-leave .label{animation:pnoutl .3s cubic-bezier(.4,0,.2,1) forwards;animation-delay:calc(var(--i) * .03s)}
+@keyframes pnoutl{to{transform:translate(14px,-50%);opacity:0}}
 
 @keyframes pnidle{0%{transform:scale(1);opacity:0}4%{opacity:.4}35%{transform:scale(2.6);opacity:0}100%{transform:scale(2.6);opacity:0}}
 @keyframes pnbreath{0%,100%{transform:scale(.8);opacity:.7}50%{transform:scale(1.15);opacity:1}}
